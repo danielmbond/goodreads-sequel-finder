@@ -1,0 +1,10 @@
+# Ignore all Goodreads data exports and generated result sheets
+*.csv
+
+# Ignore all local search tracking caches
+*.json
+
+# Ignore system configuration or environment variables if added later
+.env
+__pycache__/
+*.pyc
