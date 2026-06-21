@@ -6,7 +6,7 @@ import time
 import json
 import os
 
-for pkg in ('requests', 'python-dotenv'):
+for pkg in ('requests', 'python-dotenv', 'rapidfuzz'):
     try:
         __import__(pkg.replace('-', '_'))
     except ImportError:
@@ -15,6 +15,7 @@ for pkg in ('requests', 'python-dotenv'):
 
 import requests
 from dotenv import load_dotenv
+from rapidfuzz import fuzz, process as fuzz_process
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -34,6 +35,17 @@ COMPILATION_PATTERNS = re.compile(
     r'|\b\d+\s*[-–]\s*\d+\b',
     re.IGNORECASE,
 )
+SUBTITLE_NOISE = re.compile(
+    r'(?:\ba\s+)?litrpg(?:/\w+)?(?:\s+adventure)?\b|\ba\s+(?:novel|thriller|saga|story|tale)\b',
+    re.IGNORECASE,
+)
+WORD_NUMBERS = {
+    'one': '1', 'two': '2', 'three': '3', 'four': '4', 'five': '5',
+    'six': '6', 'seven': '7', 'eight': '8', 'nine': '9', 'ten': '10',
+    'eleven': '11', 'twelve': '12', 'thirteen': '13', 'fourteen': '14',
+    'fifteen': '15', 'sixteen': '16', 'seventeen': '17', 'eighteen': '18',
+    'nineteen': '19', 'twenty': '20',
+}
 
 
 def load_cache():
@@ -81,8 +93,13 @@ def _is_compilation(title):
 
 
 def _normalize_title(title):
-    t = re.sub(r'\s*\([^)]+,\s*#[\d.]+\)', '', title)
+    t = re.sub(r'\s*\([^)]+,?\s*#[\d.]+\)', '', title)           # strip (Series, #N) or (Series #N)
+    t = re.sub(r'^(.*?),\s*the\s*$', r'the \1', t.strip(), flags=re.IGNORECASE)  # "Foo, The" → "The Foo"
+    t = SUBTITLE_NOISE.sub(' ', t)                                 # strip LitRPG / "a novel" etc.
     t = re.sub(r'[^a-z0-9 ]', ' ', t.lower())
+    t = re.sub(r'\s+', ' ', t).strip()
+    for word, digit in WORD_NUMBERS.items():
+        t = re.sub(r'\b' + word + r'\b', digit, t)
     return re.sub(r'\s+', ' ', t).strip()
 
 
@@ -95,10 +112,26 @@ def _is_already_read(title, read_titles, read_titles_normalized):
     for nt in read_titles_normalized:
         if not nt:
             continue
-        prefix = nt + ' '
-        if norm.startswith(prefix):
-            after = norm[len(prefix):]
+        # ISBNdb title starts with GR base title
+        if norm.startswith(nt + ' '):
+            after = norm[len(nt) + 1:]
             if not after or not after[0].isdigit():
+                return True
+        # GR title starts with ISBNdb base title (ISBNdb is shorter/cleaner)
+        if nt.startswith(norm + ' '):
+            after = nt[len(norm) + 1:]
+            if not after or not after[0].isdigit():
+                return True
+    # Fuzzy fallback: token_set_ratio handles remaining word-order/noise differences.
+    # Guard: only match if both titles contain the same standalone numbers (prevents
+    # book 1's title from fuzzy-matching book 13's ISBNdb entry).
+    if len(norm) >= 10:
+        result = fuzz_process.extractOne(
+            norm, read_titles_normalized, scorer=fuzz.token_set_ratio, score_cutoff=85
+        )
+        if result is not None:
+            best = result[0]
+            if set(re.findall(r'\b\d+\b', norm)) == set(re.findall(r'\b\d+\b', best)):
                 return True
     return False
 
@@ -118,7 +151,7 @@ def _extract_books(books, author_name, series_name):
         if series_lower not in title.lower() and series_lower not in title_long.lower():
             continue
 
-        if _is_compilation(title):
+        if _is_compilation(title) or _is_compilation(title_long):
             continue
 
         clean_title = re.sub(r'\(.*?\)', '', title).strip()
