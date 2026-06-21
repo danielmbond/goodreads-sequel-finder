@@ -94,6 +94,7 @@ def _is_compilation(title):
 
 def _normalize_title(title):
     t = re.sub(r'\s*\([^)]+,?\s*#[\d.]+\)', '', title)           # strip (Series, #N) or (Series #N)
+    t = re.sub(r'\s*\([^)]+\)', '', t)                            # strip remaining parentheticals e.g. (We Are Bob)
     t = re.sub(r'^(.*?),\s*the\s*$', r'the \1', t.strip(), flags=re.IGNORECASE)  # "Foo, The" → "The Foo"
     t = SUBTITLE_NOISE.sub(' ', t)                                 # strip LitRPG / "a novel" etc.
     t = re.sub(r'[^a-z0-9 ]', ' ', t.lower())
@@ -103,28 +104,27 @@ def _normalize_title(title):
     return re.sub(r'\s+', ' ', t).strip()
 
 
-def _is_already_read(title, read_titles, read_titles_normalized):
-    if title.lower() in read_titles:
-        return True
-    norm = _normalize_title(title)
+def _strip_series_prefix(norm, series_norm):
+    if not norm.startswith(series_norm + ' '):
+        return norm
+    remainder = norm[len(series_norm):].strip()
+    return re.sub(r'^\d+\s*', '', remainder).strip()
+
+
+def _matches_read(norm, read_titles_normalized):
     if norm in read_titles_normalized:
         return True
     for nt in read_titles_normalized:
         if not nt:
             continue
-        # ISBNdb title starts with GR base title
         if norm.startswith(nt + ' '):
             after = norm[len(nt) + 1:]
             if not after or not after[0].isdigit():
                 return True
-        # GR title starts with ISBNdb base title (ISBNdb is shorter/cleaner)
         if nt.startswith(norm + ' '):
             after = nt[len(norm) + 1:]
             if not after or not after[0].isdigit():
                 return True
-    # Fuzzy fallback: token_set_ratio handles remaining word-order/noise differences.
-    # Guard: only match if both titles contain the same standalone numbers (prevents
-    # book 1's title from fuzzy-matching book 13's ISBNdb entry).
     if len(norm) >= 10:
         result = fuzz_process.extractOne(
             norm, read_titles_normalized, scorer=fuzz.token_set_ratio, score_cutoff=85
@@ -133,6 +133,19 @@ def _is_already_read(title, read_titles, read_titles_normalized):
             best = result[0]
             if set(re.findall(r'\b\d+\b', norm)) == set(re.findall(r'\b\d+\b', best)):
                 return True
+    return False
+
+
+def _is_already_read(title, read_titles, read_titles_normalized, series_name=None):
+    if title.lower() in read_titles:
+        return True
+    norm = _normalize_title(title)
+    if _matches_read(norm, read_titles_normalized):
+        return True
+    if series_name:
+        alt = _strip_series_prefix(norm, _normalize_title(series_name))
+        if alt and alt != norm and _matches_read(alt, read_titles_normalized):
+            return True
     return False
 
 
@@ -239,7 +252,7 @@ def main():
         print(f"[{i}/{len(read_series)}] Checking: {s_name}")
         books = get_series_from_isbndb(s_name, data['author'], cache)
         for b in books:
-            if not _is_already_read(b['title'], read_titles, read_titles_normalized):
+            if not _is_already_read(b['title'], read_titles, read_titles_normalized, s_name):
                 print(f"  -> FOUND: {b['title']}")
                 missing.append(b)
 
