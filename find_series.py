@@ -29,6 +29,11 @@ CACHE_DAYS = 30
 DELAY = 1.0
 ISBNDB_API_KEY = os.environ['ISBNDB_API_KEY']
 ISBNDB_BASE_URL = 'https://api2.isbndb.com'
+COMPILATION_PATTERNS = re.compile(
+    r'\b(collection|complete series|box set|omnibus|bundle|books \d[\d\s,\-]*)\b'
+    r'|\b\d+\s*[-–]\s*\d+\b',
+    re.IGNORECASE,
+)
 
 
 def load_cache():
@@ -71,6 +76,10 @@ def _search_isbndb(query):
     return resp.json().get('books', [])
 
 
+def _is_compilation(title):
+    return bool(COMPILATION_PATTERNS.search(title))
+
+
 def _extract_books(books, author_name, series_name):
     found = []
     series_lower = series_name.lower()
@@ -84,6 +93,9 @@ def _extract_books(books, author_name, series_name):
             continue
 
         if series_lower not in title.lower() and series_lower not in title_long.lower():
+            continue
+
+        if _is_compilation(title):
             continue
 
         clean_title = re.sub(r'\(.*?\)', '', title).strip()
