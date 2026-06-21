@@ -31,7 +31,7 @@ DELAY = 1.0
 ISBNDB_API_KEY = os.environ['ISBNDB_API_KEY']
 ISBNDB_BASE_URL = 'https://api2.isbndb.com'
 COMPILATION_PATTERNS = re.compile(
-    r'\b(collection|complete series|box set|omnibus|bundle|books \d[\d\s,\-]*)\b'
+    r'\b(collection|complete series|boxed?\s*set|omnibus|bundle|books \d[\d\s,\-]*)\b'
     r'|\b\d+\s*[-–]\s*\d+\b',
     re.IGNORECASE,
 )
