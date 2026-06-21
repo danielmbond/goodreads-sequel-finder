@@ -80,6 +80,29 @@ def _is_compilation(title):
     return bool(COMPILATION_PATTERNS.search(title))
 
 
+def _normalize_title(title):
+    t = re.sub(r'\s*\([^)]+,\s*#[\d.]+\)', '', title)
+    t = re.sub(r'[^a-z0-9 ]', ' ', t.lower())
+    return re.sub(r'\s+', ' ', t).strip()
+
+
+def _is_already_read(title, read_titles, read_titles_normalized):
+    if title.lower() in read_titles:
+        return True
+    norm = _normalize_title(title)
+    if norm in read_titles_normalized:
+        return True
+    for nt in read_titles_normalized:
+        if not nt:
+            continue
+        prefix = nt + ' '
+        if norm.startswith(prefix):
+            after = norm[len(prefix):]
+            if not after or not after[0].isdigit():
+                return True
+    return False
+
+
 def _extract_books(books, author_name, series_name):
     found = []
     series_lower = series_name.lower()
@@ -137,11 +160,13 @@ def get_series_from_isbndb(series_name, author_name, cache):
 def read_library(path):
     read_series = {}
     read_titles = set()
+    read_titles_normalized = set()
     with open(path, 'r', encoding='utf-8') as f:
         for row in csv.DictReader(f):
             title = row.get('Title', '')
             author = row.get('Author', '')
             read_titles.add(title.lower())
+            read_titles_normalized.add(_normalize_title(title))
 
             if row.get('Exclusive Shelf') != 'read':
                 continue
@@ -152,7 +177,7 @@ def read_library(path):
                 if s_name not in read_series:
                     read_series[s_name] = {'author': author}
 
-    return read_series, read_titles
+    return read_series, read_titles, read_titles_normalized
 
 
 def write_output(path, books):
@@ -171,7 +196,7 @@ def main():
         sys.exit(1)
 
     print(f"Reading {INPUT_FILE}...")
-    read_series, read_titles = read_library(INPUT_FILE)
+    read_series, read_titles, read_titles_normalized = read_library(INPUT_FILE)
 
     cache = load_cache()
     missing = []
@@ -181,7 +206,7 @@ def main():
         print(f"[{i}/{len(read_series)}] Checking: {s_name}")
         books = get_series_from_isbndb(s_name, data['author'], cache)
         for b in books:
-            if b['title'].lower() not in read_titles:
+            if not _is_already_read(b['title'], read_titles, read_titles_normalized):
                 print(f"  -> FOUND: {b['title']}")
                 missing.append(b)
 
